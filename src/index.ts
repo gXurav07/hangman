@@ -1,3 +1,3 @@
-import { Add } from './Add.js';
+import { Hangman, GameState } from './Hangman.js';
 
-export { Add };
+export { Hangman, GameState };
