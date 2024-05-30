@@ -1,78 +1,5 @@
-import { Field, SmartContract, state, State, method, CircuitString, Bool, PublicKey, UInt8, Character, Poseidon, Signature } from 'o1js';
-
-/**
- * Basic Example
- * See https://docs.minaprotocol.com/zkapps for more info.
- *
- * The Add contract initializes the state variable 'num' to be a Field(1) value by default when deployed.
- * When the 'update' method is called, the Add contract adds Field(2) to its 'num' contract state.
- *
- * This file is safe to delete and replace with your own contract.
- */
-
-export { GameState, Hangman };
-
-
-function addGapsToString(str: string): string {
-  // Split the string into an array of characters, then join them with spaces
-  let result = str.split('').join(' ');
-  result = result.replace('   ', '     ');
-  
-  return result;
-}
-
-const MAX_LEN = 100;
-class GameState{
-  phraseToGuess: string;
-  currentState: Bool[];
-  movesLeft: number;
-
-  constructor(phraseToGuess_: CircuitString, currentState_: Field, movesLeft_: UInt8){
-    this.phraseToGuess = phraseToGuess_.toString();
-    this.currentState = currentState_.toBits(MAX_LEN);
-    this.movesLeft = movesLeft_.toNumber();
-  }
-
-  static generateInitialState(phraseToGuess_: CircuitString|string): Field{
-    let currentState_ = [];
-    const phrase = phraseToGuess_.toString();
-    for(let i = 0; i < phrase.length; i++){
-      currentState_.push(new Bool(phrase[i] === " " ? true : false)); // initial true for spaces
-    }
-    for(let i = phrase.length; i < MAX_LEN; i++){
-      currentState_.push(new Bool(true)); // fill leftover character slots with space
-    }
-    return Field.fromBits(currentState_);
-  }
-
-  generateInitialState(): Field{
-    return GameState.generateInitialState(this.phraseToGuess);
-  }
-
-  updateState(guess: Character){
-    let guessedChar = guess.toString();
-    let found = false;
-    for(let i = 0; i < this.phraseToGuess.length; i++){
-      if(this.phraseToGuess[i] === guessedChar){
-        this.currentState[i] = new Bool(true);
-        found = true;
-      } 
-    }
-    if(!found){
-      this.movesLeft--;
-    }
-  }
-
-  serializedCurrentState(): Field{
-    return Field.fromBits(this.currentState);
-  }
-
-  isGameOver(): Bool{
-    return new Bool(this.movesLeft === 0 || !this.currentState.includes(new Bool(false)));
-  }
-
-}
-
+import { Field, SmartContract, state, State, method, CircuitString, Bool, PublicKey, UInt8, Character, Poseidon, Signature, Provable } from 'o1js';
+export { Hangman };
 
 class Hangman extends SmartContract {
   @state(Field) phraseHash = State<Field>();
@@ -82,106 +9,123 @@ class Hangman extends SmartContract {
 
   @state(Character) lastGuess = State<Character>();
   
-  @state(Bool) nextIsPlayer2 = State<Bool>();
-  @state(Bool) gameDone = State<Bool>();
+  // @state(Bool) wordGuesserToPlay = State<Bool>();
+  // @state(Bool) gameDone = State<Bool>();
 
-  @state(PublicKey) player1 = State<PublicKey>();
-  @state(PublicKey) player2 = State<PublicKey>();
+  @state(PublicKey) wordMaster = State<PublicKey>();
+  @state(PublicKey) wordGuesser = State<PublicKey>();
 
   init() {
     super.init();
-    this.gameDone.set(Bool(true));
-    this.player1.set(PublicKey.empty());
-    this.player2.set(PublicKey.empty());
+    // this.gameDone.set(Bool(true));
+    this.wordMaster.set(PublicKey.empty());
+    this.wordGuesser.set(PublicKey.empty());
   }
+  // constants for the game
+  static WORD_LENGTH=10;
+  static MAX_MOVES=new UInt8(6);
 
-  @method async startGame(player1: PublicKey, player2: PublicKey, phraseToGuess: CircuitString){
+  @method async startGame(wordGuesserAddress: PublicKey, phraseToGuess: CircuitString){
     // you can only start a new game if the current game is done
-    this.gameDone.requireEquals(Bool(true));
-    this.gameDone.set(Bool(false));
+    // this.gameDone.getAndRequireEquals().assertTrue();
+    // this.gameDone.set(Bool(false));
     // set players
-    this.player1.set(player1);
-    this.player2.set(player2);
+  
+    this.wordMaster.set( this.sender.getAndRequireSignature());
+    this.wordGuesser.set(wordGuesserAddress);
     // store the hash of the phrase(must be secret)
-    this.phraseHash.set(Poseidon.hash([phraseToGuess.hash()]));
+    this.phraseHash.set(phraseToGuess.hash());
 
     // set initial game state
-    this.revealedPositions.set(GameState.generateInitialState(phraseToGuess));
-    this.movesLeft.set(new UInt8(6));
+    let isNullFound=Bool(false);
+    const correctGuessBits=[...Array(Hangman.WORD_LENGTH)].map((_,i)=>{
+      return isNullFound.or(phraseToGuess.values[i].isNull())
+    });
+    
+    this.revealedPositions.set(Field.fromBits(correctGuessBits));
 
-
-    // player 2 starts
-    // this.nextIsPlayer2.set(Bool(true));
+    this.movesLeft.set(Hangman.MAX_MOVES);
+    // time to guess the word
+    // this.wordGuesserToPlay.set(Bool(true));
   }
 
-  @method async guess(  // must be called by player 2
-    pubkey: PublicKey,
-    signature: Signature,
-    guess: Character
-  ) {
+  /**
+   * must be the turn for the word guesser
+   * @param pubkey 
+   * @param signature 
+   * @param guess 
+   */
+  @method async guess(guess: Character) {
     // if the game is already finished, abort.
-    this.gameDone.requireEquals(Bool(false));
+    // this.gameDone.requireEquals(Bool(false));
 
     // ensure that its player 2's turn
-    // this.nextIsPlayer2.requireEquals(Bool(true));
+    // this.wordGuesserToPlay.requireEquals(Bool(false));
     
-    // ensure player owns the associated private key
-    signature.verify(pubkey, [guess.toField()]).assertTrue();
-    
-    // ensure player is player 2
-    const player2 = this.player2.getAndRequireEquals();
-    Bool(pubkey.equals(player2)).assertTrue();
+    // transaction must be signed by the word guesser
+    this.sender.getAndRequireSignature().assertEquals(this.wordGuesser.getAndRequireEquals());
     
     // update last guess
     this.lastGuess.set(guess);
     
     // update turn
-    // this.nextIsPlayer2.set(Bool(false));
-
+    // this.wordGuesserToPlay.set(Bool(false));
   }
 
-  @method async reveal(  // must be called by player 1
-    pubkey: PublicKey,
-    signature: Signature,
-    phraseToGuess: CircuitString,
-  ) {
+  /**
+   * must be the turn for the word master
+   * @param phraseToGuess 
+   */
+  @method async reveal(phraseToGuess: CircuitString) {
     // if the game is already finished, abort.
-    this.gameDone.requireEquals(Bool(false));
+    // this.gameDone.requireEquals(Bool(false));
 
     // ensure that its player 1's turn
-    // this.nextIsPlayer2.requireEquals(Bool(false));
+    // this.wordGuesserToPlay.requireEquals(Bool(false));
 
-    // ensure player owns the associated private key
-    signature.verify(pubkey, [phraseToGuess.hash()]).assertTrue();
-
-    // ensure player is player 1
-    const player1 = this.player1.getAndRequireEquals();
-    Bool(pubkey.equals(player1)).assertTrue();
+    // transaction must be signed by the word guesser
+    this.sender.getAndRequireSignature().assertEquals(this.wordMaster.getAndRequireEquals());
 
     // ensure the phrase hash matches
     const phraseHash = this.phraseHash.getAndRequireEquals();
-    phraseHash.assertEquals(Poseidon.hash([phraseToGuess.hash()]));
+
+    phraseHash.assertEquals(phraseToGuess.hash());
     
-    const revealedPositions = this.revealedPositions.getAndRequireEquals();
     const movesLeft = this.movesLeft.getAndRequireEquals();
 
-    // create game state
-    let gameState = new GameState(phraseToGuess, revealedPositions, movesLeft);
+    // moves must be positive handled by UInt8
+    this.movesLeft.set(new UInt8(movesLeft.sub(1)));
+
+    // update the game
     
-    const lastGuess = this.lastGuess.getAndRequireEquals();
+    const revealedPositions = this.revealedPositions.getAndRequireEquals();
+    
+    const alreadyGuessedBits=revealedPositions.toBits(Hangman.WORD_LENGTH);
 
-    // update game state
-    gameState.updateState(lastGuess);
+    // Provable.asProver(()=>{
+    //   console.log("##alreadyGuessedBits\n",alreadyGuessedBits.map(b=>b.toString()).join(","));
+    // })
 
-    // update state variables
-    this.revealedPositions.set(gameState.serializedCurrentState());
-    this.movesLeft.set(new UInt8(gameState.movesLeft));
+    const lastGuess = this.lastGuess.getAndRequireEquals().toField();
+    const correctGuessBits=[...Array(Hangman.WORD_LENGTH)].map((_,i)=>{
+      return alreadyGuessedBits[i].or(
+        lastGuess.equals(phraseToGuess.values[i].toField())
+      )
+    });
+
+    // Provable.asProver(()=>{
+    //   console.log("##",correctGuessBits.map(b=>b.toString()).join(","));
+    // })
+
+    this.revealedPositions.set(Field.fromBits(correctGuessBits));
+
+    // the game is over when we guess all the letters or we run out of moves
+    const isGameOver=correctGuessBits.reduce(Bool.and).or(movesLeft.value.equals(0));
 
     // update turn
-    // this.nextIsPlayer2.set(Bool(true));
+    // this.wordGuesserToPlay.set(Bool(true));
 
     // check if game is over
-    this.gameDone.set(gameState.isGameOver());
-
+    // this.gameDone.set(isGameOver);
   }
 }
