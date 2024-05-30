@@ -36,15 +36,15 @@ await txn.sign([zkAppPrivateKey, player1Key]).send();
 
 console.log('after transaction');
 
-function printGameState(){
-    const currentState = zkApp.currentState.get();
-    const wrongGuesses = zkApp.wrongGuesses.get();
-    const movesLeft = zkApp.movesLeft.get();
-    const gameDone = zkApp.gameDone.get();
+// function printGameState(){
+//     const currentState = zkApp.currentState.get();
+//     const wrongGuesses = zkApp.wrongGuesses.get();
+//     const movesLeft = zkApp.movesLeft.get();
+//     const gameDone = zkApp.gameDone.get();
 
-    const gameState = new GameState(phraseToGuess, currentState, wrongGuesses, movesLeft);
-    gameState.printGameState();
-}
+//     const gameState = new GameState(phraseToGuess, currentState, wrongGuesses, movesLeft);
+//     gameState.printGameState();
+// }
 
 async function guess(player: PublicKey, playerKey: PrivateKey, guessedChar: string){
     const guess = Character.fromString(guessedChar);
@@ -68,12 +68,12 @@ async function reveal(player: PublicKey, playerKey: PrivateKey, phraseToGuess: C
 async function playMove(guessedChar: string){
     await guess(player2, player2Key, guessedChar);
     await reveal(player1, player1Key, phraseToGuess);
-    printGameState();
+    // printGameState();
 }
 
 
 // initial state
-printGameState();
+// printGameState();
 
 // play
 console.log('\n\n====== FIRST MOVE ======\n\n');

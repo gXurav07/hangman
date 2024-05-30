@@ -21,83 +21,68 @@ function addGapsToString(str: string): string {
   return result;
 }
 
+const MAX_LEN = 100;
 class GameState{
-phraseToGuess: string;
-currentState: string;
-wrongGuesses: string;
-movesLeft: number;
+  phraseToGuess: string;
+  currentState: Bool[];
+  movesLeft: number;
 
-constructor(phraseToGuess_: CircuitString, currentState_: CircuitString, wrongGuesses: CircuitString, movesLeft_: UInt8){
-  this.phraseToGuess = phraseToGuess_.toString();
-  this.currentState = currentState_.toString();
-  this.wrongGuesses = wrongGuesses.toString();
-  this.movesLeft = movesLeft_.toNumber();
-}
-
-static generateInitialState(phraseToGuess_: CircuitString): CircuitString{
-  let currentState_ = "";
-  const phrase = phraseToGuess_.toString();
-  for(let i = 0; i < phrase.length; i++){
-    currentState_ += phrase[i] === " " ? " " : "_";
+  constructor(phraseToGuess_: CircuitString, currentState_: Field, movesLeft_: UInt8){
+    this.phraseToGuess = phraseToGuess_.toString();
+    this.currentState = currentState_.toBits(MAX_LEN);
+    this.movesLeft = movesLeft_.toNumber();
   }
-  return CircuitString.fromString(currentState_);
-}
 
-generateInitialState(): CircuitString{
-  let currentState_ = "";
-  for(let i = 0; i < this.phraseToGuess.length; i++){
-    currentState_ += this.phraseToGuess[i] === " " ? " " : "_";
+  static generateInitialState(phraseToGuess_: CircuitString|string): Field{
+    let currentState_ = [];
+    const phrase = phraseToGuess_.toString();
+    for(let i = 0; i < phrase.length; i++){
+      currentState_.push(new Bool(phrase[i] === " " ? true : false)); // initial true for spaces
+    }
+    for(let i = phrase.length; i < MAX_LEN; i++){
+      currentState_.push(new Bool(true)); // fill leftover character slots with space
+    }
+    return Field.fromBits(currentState_);
   }
-  return CircuitString.fromString(currentState_);
-}
 
-updateState(guess: Character){
-  let guessedChar = guess.toString();
-  let newCurrentState = "";
-  let found = false;
-  for(let i = 0; i < this.phraseToGuess.length; i++){
-    if(this.phraseToGuess[i] === guessedChar){
-      newCurrentState += guessedChar;
-      found = true;
-    } else {
-      newCurrentState += this.currentState[i];
+  generateInitialState(): Field{
+    return GameState.generateInitialState(this.phraseToGuess);
+  }
+
+  updateState(guess: Character){
+    let guessedChar = guess.toString();
+    let found = false;
+    for(let i = 0; i < this.phraseToGuess.length; i++){
+      if(this.phraseToGuess[i] === guessedChar){
+        this.currentState[i] = new Bool(true);
+        found = true;
+      } 
+    }
+    if(!found){
+      this.movesLeft--;
     }
   }
-  if(!found){
-    if(!this.wrongGuesses.includes(guessedChar)){
-      this.wrongGuesses += guessedChar;
-    }
-    this.movesLeft -= 1;
-  }
-  else{
-      this.currentState = newCurrentState;
-  }
-}
 
-isGameOver(): Bool{
-  return new Bool(this.movesLeft === 0 || !this.currentState.includes("_"));
-}
+  serializedCurrentState(): Field{
+    return Field.fromBits(this.currentState);
+  }
 
-printGameState(){
-  console.log("Current State: ", addGapsToString(this.currentState));
-  console.log("Wrong Guesses: ", this.wrongGuesses);
-  console.log("Moves Left: ", this.movesLeft);
-  console.log("Game Over: ", this.isGameOver().toBoolean());
-  console.log("======================================\n");
-}
+  isGameOver(): Bool{
+    return new Bool(this.movesLeft === 0 || !this.currentState.includes(new Bool(false)));
+  }
+
 }
 
 
 class Hangman extends SmartContract {
   @state(Field) phraseHash = State<Field>();
   
-  @state(CircuitString) currentState = State<CircuitString>();
-  @state(CircuitString) wrongGuesses = State<CircuitString>();
+  @state(Field) revealedPositions = State<Field>();
   @state(UInt8) movesLeft = State<UInt8>();
 
   @state(Character) lastGuess = State<Character>();
   
-  // @state(Bool) nextIsPlayer2 = State<Bool>();
+  @state(Bool) nextIsPlayer2 = State<Bool>();
   @state(Bool) gameDone = State<Bool>();
 
   @state(PublicKey) player1 = State<PublicKey>();
@@ -121,8 +106,7 @@ class Hangman extends SmartContract {
     this.phraseHash.set(Poseidon.hash([phraseToGuess.hash()]));
 
     // set initial game state
-    this.currentState.set(GameState.generateInitialState(phraseToGuess));
-    this.wrongGuesses.set(CircuitString.fromString(""));
+    this.revealedPositions.set(GameState.generateInitialState(phraseToGuess));
     this.movesLeft.set(new UInt8(6));
 
 
@@ -138,15 +122,21 @@ class Hangman extends SmartContract {
     // if the game is already finished, abort.
     this.gameDone.requireEquals(Bool(false));
 
+    // ensure that its player 2's turn
+    // this.nextIsPlayer2.requireEquals(Bool(true));
+    
     // ensure player owns the associated private key
     signature.verify(pubkey, [guess.toField()]).assertTrue();
-
+    
     // ensure player is player 2
     const player2 = this.player2.getAndRequireEquals();
     Bool(pubkey.equals(player2)).assertTrue();
-
+    
     // update last guess
     this.lastGuess.set(guess);
+    
+    // update turn
+    // this.nextIsPlayer2.set(Bool(false));
 
   }
 
@@ -157,6 +147,9 @@ class Hangman extends SmartContract {
   ) {
     // if the game is already finished, abort.
     this.gameDone.requireEquals(Bool(false));
+
+    // ensure that its player 1's turn
+    // this.nextIsPlayer2.requireEquals(Bool(false));
 
     // ensure player owns the associated private key
     signature.verify(pubkey, [phraseToGuess.hash()]).assertTrue();
@@ -169,12 +162,11 @@ class Hangman extends SmartContract {
     const phraseHash = this.phraseHash.getAndRequireEquals();
     phraseHash.assertEquals(Poseidon.hash([phraseToGuess.hash()]));
     
-    const currentState = this.currentState.getAndRequireEquals();
-    const wrongGuesses = this.wrongGuesses.getAndRequireEquals();
+    const revealedPositions = this.revealedPositions.getAndRequireEquals();
     const movesLeft = this.movesLeft.getAndRequireEquals();
 
     // create game state
-    let gameState = new GameState(phraseToGuess, currentState, wrongGuesses, movesLeft);
+    let gameState = new GameState(phraseToGuess, revealedPositions, movesLeft);
     
     const lastGuess = this.lastGuess.getAndRequireEquals();
 
@@ -182,9 +174,11 @@ class Hangman extends SmartContract {
     gameState.updateState(lastGuess);
 
     // update state variables
-    this.currentState.set(CircuitString.fromString(gameState.currentState));
-    this.wrongGuesses.set(CircuitString.fromString(gameState.wrongGuesses));
+    this.revealedPositions.set(gameState.serializedCurrentState());
     this.movesLeft.set(new UInt8(gameState.movesLeft));
+
+    // update turn
+    // this.nextIsPlayer2.set(Bool(true));
 
     // check if game is over
     this.gameDone.set(gameState.isGameOver());
