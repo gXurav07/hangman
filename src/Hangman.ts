@@ -74,44 +74,75 @@ class GameState{
 }
 
 
+function serializeStates(movesLeft: UInt8, nextIsPlayer2: Bool, gameDone: Bool): Field {
+  let states: Bool[] = new Array(9).fill(new Bool(false));  // 7 bits for movesLeft, 1 bit for nextIsPlayer2, 1 bit for gameDone
+  states[movesLeft.toNumber()] = new Bool(true);
+  states[7] = nextIsPlayer2;
+  states[8] = gameDone;
+  return Field.fromBits(states);
+}
+
+function deserializeStates(serializedStates: Field): [UInt8, Bool, Bool] {
+  let movesLeft = new UInt8(0);
+  let nextIsPlayer2 = new Bool(false);
+  let gameDone = new Bool(false);
+  let stateBits = serializedStates.toBits(9);
+  for (let i = 0; i <= 6; i++) {
+    if (stateBits[i].toBoolean()) {
+      movesLeft = new UInt8(i);
+      break;
+    }
+  }
+  nextIsPlayer2 = stateBits[7];
+  gameDone = stateBits[8];
+  return [movesLeft, nextIsPlayer2, gameDone];
+}
+
+
 class Hangman extends SmartContract {
   @state(Field) phraseHash = State<Field>();
   
   @state(Field) revealedPositions = State<Field>();
-  @state(UInt8) movesLeft = State<UInt8>();
-
+  
   @state(Character) lastGuess = State<Character>();
   
-  @state(Bool) nextIsPlayer2 = State<Bool>();
-  @state(Bool) gameDone = State<Bool>();
+  @state(Field) serializedStates = State<Field>();
 
   @state(PublicKey) player1 = State<PublicKey>();
   @state(PublicKey) player2 = State<PublicKey>();
 
   init() {
     super.init();
-    this.gameDone.set(Bool(true));
+    this.serializedStates.set(serializeStates(new UInt8(0), new Bool(false), new Bool(true))); // moves left, nextIsPlayer2 , gameDone
     this.player1.set(PublicKey.empty());
     this.player2.set(PublicKey.empty());
   }
 
+
+
   @method async startGame(player1: PublicKey, player2: PublicKey, phraseToGuess: CircuitString){
     // you can only start a new game if the current game is done
-    this.gameDone.requireEquals(Bool(true));
-    this.gameDone.set(Bool(false));
-    // set players
-    this.player1.set(player1);
-    this.player2.set(player2);
-    // store the hash of the phrase(must be secret)
-    this.phraseHash.set(Poseidon.hash([phraseToGuess.hash()]));
+    let serializedStates = this.serializedStates.get();
+    // let [movesLeft, nextIsPlayer2, gameDone] = deserializeStates(serializedStates);
 
-    // set initial game state
-    this.revealedPositions.set(GameState.generateInitialState(phraseToGuess));
-    this.movesLeft.set(new UInt8(6));
+    // gameDone.assertEquals(Bool(true));
+    // gameDone = Bool(false);
+    // // set players
+    // this.player1.set(player1);
+    // this.player2.set(player2);
+    // // store the hash of the phrase(must be secret)
+    // this.phraseHash.set(Poseidon.hash([phraseToGuess.hash()]));
+
+    // // set initial game state
+    // this.revealedPositions.set(GameState.generateInitialState(phraseToGuess));
+    // movesLeft = new UInt8(6);
 
 
-    // player 2 starts
-    // this.nextIsPlayer2.set(Bool(true));
+    // // player 2 starts
+    // nextIsPlayer2 = Bool(true);
+
+    // // serialize and update state
+    // this.serializedStates.set(serializeStates(movesLeft, nextIsPlayer2, gameDone));
   }
 
   @method async guess(  // must be called by player 2
@@ -119,11 +150,13 @@ class Hangman extends SmartContract {
     signature: Signature,
     guess: Character
   ) {
+    const serializedStates = this.serializedStates.getAndRequireEquals();
+    let [movesLeft, nextIsPlayer2, gameDone] = deserializeStates(serializedStates);
     // if the game is already finished, abort.
-    this.gameDone.requireEquals(Bool(false));
+    gameDone.assertEquals(Bool(false));
 
     // ensure that its player 2's turn
-    // this.nextIsPlayer2.requireEquals(Bool(true));
+    nextIsPlayer2.assertEquals(Bool(true));
     
     // ensure player owns the associated private key
     signature.verify(pubkey, [guess.toField()]).assertTrue();
@@ -136,7 +169,10 @@ class Hangman extends SmartContract {
     this.lastGuess.set(guess);
     
     // update turn
-    // this.nextIsPlayer2.set(Bool(false));
+    nextIsPlayer2 = Bool(false);
+
+    // serialize and update state
+    this.serializedStates.set(serializeStates(movesLeft, nextIsPlayer2, gameDone));
 
   }
 
@@ -145,8 +181,13 @@ class Hangman extends SmartContract {
     signature: Signature,
     phraseToGuess: CircuitString,
   ) {
+
+    const serializedStates = this.serializedStates.getAndRequireEquals();
+    let [movesLeft, nextIsPlayer2, gameDone] = deserializeStates(serializedStates);
+
+
     // if the game is already finished, abort.
-    this.gameDone.requireEquals(Bool(false));
+    gameDone.assertEquals(Bool(false));
 
     // ensure that its player 1's turn
     // this.nextIsPlayer2.requireEquals(Bool(false));
@@ -163,7 +204,6 @@ class Hangman extends SmartContract {
     phraseHash.assertEquals(Poseidon.hash([phraseToGuess.hash()]));
     
     const revealedPositions = this.revealedPositions.getAndRequireEquals();
-    const movesLeft = this.movesLeft.getAndRequireEquals();
 
     // create game state
     let gameState = new GameState(phraseToGuess, revealedPositions, movesLeft);
@@ -175,13 +215,16 @@ class Hangman extends SmartContract {
 
     // update state variables
     this.revealedPositions.set(gameState.serializedCurrentState());
-    this.movesLeft.set(new UInt8(gameState.movesLeft));
+    movesLeft = new UInt8(gameState.movesLeft);
 
     // update turn
     // this.nextIsPlayer2.set(Bool(true));
 
     // check if game is over
-    this.gameDone.set(gameState.isGameOver());
+    gameDone = gameState.isGameOver();
+    
+    // serialize and update state
+    this.serializedStates.set(serializeStates(movesLeft, nextIsPlayer2, gameDone));
 
   }
 }

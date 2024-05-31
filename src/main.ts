@@ -7,6 +7,7 @@ import {
     Signature,
     CircuitString,
     Character,
+    fetchAccount,
 }   from 'o1js';
 
 import { GameState, Hangman } from './Hangman.js';
@@ -24,12 +25,14 @@ const zkApp = new Hangman(zkAppPublicKey);
 const phraseToGuess = CircuitString.fromString("hello world");
 
 console.log('\n\n====== DEPLOYING ======\n\n');
+
 const txn = await Mina.transaction(player1, async () => {
   AccountUpdate.fundNewAccount(player1);
   await zkApp.deploy();
   await zkApp.startGame(player1, player2, phraseToGuess);
 });
 await txn.prove();
+console.log("Deployed");
 
 
 await txn.sign([zkAppPrivateKey, player1Key]).send();
@@ -76,25 +79,25 @@ async function playMove(guessedChar: string){
 // printGameState();
 
 // play
-console.log('\n\n====== FIRST MOVE ======\n\n');
-await playMove('a');
+// console.log('\n\n====== FIRST MOVE ======\n\n');
+// await playMove('a');
 
 // play
-console.log('\n\n====== SECOND MOVE ======\n\n');
-await playMove('b');
+// console.log('\n\n====== SECOND MOVE ======\n\n');
+// await playMove('b');
 
-// play
-console.log('\n\n====== THIRD MOVE ======\n\n');
-await playMove('c');
+// // play
+// console.log('\n\n====== THIRD MOVE ======\n\n');
+// await playMove('c');
 
-// play
-console.log('\n\n====== FOURTH MOVE ======\n\n');
-await playMove('d');
+// // play
+// console.log('\n\n====== FOURTH MOVE ======\n\n');
+// await playMove('d');
 
 
-// play
-console.log('\n\n====== FIFTH MOVE ======\n\n');
-await playMove('e');
+// // play
+// console.log('\n\n====== FIFTH MOVE ======\n\n');
+// await playMove('e');
 
 
 
