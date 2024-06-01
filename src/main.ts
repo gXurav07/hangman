@@ -39,15 +39,43 @@ await txn.sign([zkAppPrivateKey, player1Key]).send();
 
 console.log('after transaction');
 
-// function printGameState(){
-//     const currentState = zkApp.currentState.get();
-//     const wrongGuesses = zkApp.wrongGuesses.get();
-//     const movesLeft = zkApp.movesLeft.get();
-//     const gameDone = zkApp.gameDone.get();
 
-//     const gameState = new GameState(phraseToGuess, currentState, wrongGuesses, movesLeft);
-//     gameState.printGameState();
-// }
+const MAX_LENGTH = 100;
+let currentState = new Array(MAX_LENGTH).fill('_');
+let movesLeft = 6;
+let lastGuess = ' ';
+let wrongGuesses: string[] = [];
+function printGameState(){
+    let isWrongGuess = true;
+    const revealedPositions = zkApp.revealedPositions.get().toBits(100);
+
+    for(let i = 0; i < MAX_LENGTH; i++){
+        if(revealedPositions[i].toBoolean() && currentState[i] === '_'){
+            currentState[i] = lastGuess;
+            isWrongGuess = false;
+        }
+    }
+
+    if(isWrongGuess){
+        movesLeft--;
+        wrongGuesses.push(lastGuess);
+    }
+
+
+    const gameDone = zkApp.gameDone.get().toBoolean();
+
+    console.log("Current State: ", currentState.join(''));
+    console.log("Moves Left: ", movesLeft);
+    console.log("Game Done: ", gameDone);
+    console.log("Wrong Guesses: ", wrongGuesses);
+    console.log('\n\n');
+
+
+}
+
+
+
+
 
 async function guess(player: PublicKey, playerKey: PrivateKey, guessedChar: string){
     const guess = Character.fromString(guessedChar);
@@ -69,35 +97,44 @@ async function reveal(player: PublicKey, playerKey: PrivateKey, phraseToGuess: C
 }
 
 async function playMove(guessedChar: string){
-    await guess(player2, player2Key, guessedChar);
-    await reveal(player1, player1Key, phraseToGuess);
-    // printGameState();
+    await guess(player2, player2Key, guessedChar); console.log("Guessed: ", guessedChar);
+    lastGuess = guessedChar;
+    await reveal(player1, player1Key, phraseToGuess); 
+    printGameState();
 }
 
 
+
+
 // initial state
-// printGameState();
-
-// play
-// console.log('\n\n====== FIRST MOVE ======\n\n');
-// await playMove('a');
-
-// play
-// console.log('\n\n====== SECOND MOVE ======\n\n');
-// await playMove('b');
-
-// // play
-// console.log('\n\n====== THIRD MOVE ======\n\n');
-// await playMove('c');
-
-// // play
-// console.log('\n\n====== FOURTH MOVE ======\n\n');
-// await playMove('d');
+console.log('\n\n====== INITIAL STATE ======');
+printGameState();
 
 
-// // play
-// console.log('\n\n====== FIFTH MOVE ======\n\n');
-// await playMove('e');
+async function test(guess_sequence: string[]){
+  console.log('\n\n====== TESTING ======\n\n');
+
+  for(let i = 0; i < guess_sequence.length; i++){
+    try{
+      await playMove(guess_sequence[i]);
+    }
+    catch(e){
+      const gameDone = zkApp.gameDone.get().toBoolean();
+
+      if(!gameDone) console.log(e);
+      else console.log('Game Over!');
+    }
+  }
+  console.log('\n\n');
+}
+
+// await test(['h', 'e', 'a', 'b', 'l', 'o', 'w', 'r', 'd', 'f']);
+await test(['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l']);
+
+
+
+
+
 
 
 
